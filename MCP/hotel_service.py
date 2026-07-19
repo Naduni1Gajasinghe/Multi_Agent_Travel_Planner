@@ -3,8 +3,11 @@ import urllib.request
 import urllib.parse
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
+import os
 
-mcp = FastMCP("Hotel Service", port=8001)
+mcp = FastMCP("Hotel Service", port=int(os.environ.get("PORT", 8001)))
+
+
 
 BASE_URL = "https://standing-fish-574.convex.site"
 

@@ -136,7 +136,7 @@ CUSTOM_CSS = """
 
 
 def main():
-    with gr.Blocks(theme=TRAVEL_THEME, css=CUSTOM_CSS, title="TripWeaver — Travel Planner") as demo:
+    with gr.Blocks(title="TripWeaver — Travel Planner") as demo:
         with gr.Column(elem_id="header-block"):
             gr.Markdown("# ✈️ TripWeaver — Your AI Travel Planner 🏨")
             gr.Markdown(
@@ -144,7 +144,7 @@ def main():
                 "no need to say which agent to use."
             )
 
-        chatbot = gr.Chatbot(label="Chat", height=460, show_copy_button=True)
+        chatbot = gr.Chatbot(label="Chat", height=460)
 
         with gr.Row():
             message = gr.Textbox(
@@ -171,7 +171,12 @@ def main():
         message_event.then(lambda: "", None, message)
 
     demo.queue()
-    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(os.environ.get("PORT", 7860)),
+        theme=TRAVEL_THEME,
+        css=CUSTOM_CSS,
+    )
 
 
 if __name__ == "__main__":

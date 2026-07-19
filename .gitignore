@@ -1,0 +1,8 @@
+venv/
+MCP/venv/
+MCP/env/
+.env
+MCP/.env
+__pycache__/
+agents/__pycache__/
+*.pyc

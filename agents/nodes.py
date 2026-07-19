@@ -298,11 +298,17 @@ async def hotel_node(state: GraphState) -> dict:
             return {"hotel_results": [], "flight_results": [], "response_text": f"Booking failed: {e}"}
 
         parsed = _parse_mcp_result(result if isinstance(result, list) else [result]) if not isinstance(result, dict) else result
-        if isinstance(parsed, dict):
+        if isinstance(parsed, list) and parsed:
+            parsed = parsed[0]
+
+        if isinstance(parsed, dict) and parsed.get("error"):
+            confirmation = (
+                "I couldn't complete that booking — the hotel ID doesn't look valid. "
+                "Please use the ID shown next to the hotel in your search results (the long code, "
+                "not the hotel name), for example: `kh7fwtt847vjz257rmgf2ehy057rcdcz`."
+            )
+        elif isinstance(parsed, dict):
             confirmation = parsed.get("message") or parsed.get("status") or "Hotel booking completed."
-        elif isinstance(parsed, list) and parsed:
-            first = parsed[0]
-            confirmation = first.get("message") or first.get("status") or "Hotel booking completed." if isinstance(first, dict) else "Hotel booking completed."
         else:
             confirmation = "Hotel booking completed."
 
@@ -372,11 +378,17 @@ async def flight_node(state: GraphState) -> dict:
             return {"hotel_results": [], "flight_results": [], "response_text": f"Booking failed: {e}"}
 
         parsed = _parse_mcp_result(result if isinstance(result, list) else [result]) if not isinstance(result, dict) else result
-        if isinstance(parsed, dict):
+        if isinstance(parsed, list) and parsed:
+            parsed = parsed[0]
+
+        if isinstance(parsed, dict) and parsed.get("error"):
+            confirmation = (
+                "I couldn't complete that booking — the flight ID doesn't look valid. "
+                "Please use the ID shown next to the flight in your search results (the long code, "
+                "not the flight number), for example: `k974facwmkr5rj8ve3qv6d9e7h7rckga`."
+            )
+        elif isinstance(parsed, dict):
             confirmation = parsed.get("message") or parsed.get("status") or "Flight booking completed."
-        elif isinstance(parsed, list) and parsed:
-            first = parsed[0]
-            confirmation = first.get("message") or first.get("status") or "Flight booking completed." if isinstance(first, dict) else "Flight booking completed."
         else:
             confirmation = "Flight booking completed."
 

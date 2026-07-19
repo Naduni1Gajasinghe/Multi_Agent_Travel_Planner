@@ -5,7 +5,8 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 import os
 
-mcp = FastMCP("Hotel Service", port=int(os.environ.get("PORT", 8001)))
+
+mcp = FastMCP("Hotel Service", host="0.0.0.0", port=int(os.environ.get("PORT", 8001)))
 
 
 

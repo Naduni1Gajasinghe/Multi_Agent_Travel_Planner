@@ -11,7 +11,7 @@ API_STREAM_URL = os.environ.get(
 
 
 def format_flights(flights):
-    lines = ["**Flights:**"]
+    lines = ["### ✈️ Flights found\n"]
     for flight in flights:
         id = flight.get("_id", "Unknown ID")
         airline = flight.get("airline", "Unknown Airline")
@@ -26,32 +26,38 @@ def format_flights(flights):
         price = flight.get("price", "Unknown Price")
         currency = flight.get("currency", "Unknown Currency")
         available_seats = flight.get("availableSeats", "Unknown Available Seats")
+
         lines.append(
-            f"- `{id}` — {airline} {flight_number}, {origin} → {destination}, "
-            f"{flight_date} {departure_time}-{arrival_time}, {currency} {price}, {available_seats} seats"
+            f"**{airline} {flight_number}**  \n"
+            f"🛫 {origin} → 🛬 {destination}  \n"
+            f"📅 {flight_date} · 🕐 {departure_time}–{arrival_time}  \n"
+            f"💰 {currency} {price} · 💺 {available_seats} seats left  \n"
+            f"🆔 `{id}`\n\n---\n"
         )
     return "\n".join(lines)
 
 
 def format_hotels(hotels):
-    lines = ["**Hotels:**"]
+    lines = ["### 🏨 Hotels found\n"]
     for hotel in hotels:
         id = hotel.get("_id", "Unknown ID")
         name = hotel.get("name") or "Unknown Hotel"
         city = hotel.get("city") or (hotel.get("location") or {}).get("city", "")
         price_per_night = hotel.get("pricePerNight") or "Price not available"
         currency = hotel.get("currency", "")
-        lines.append(f"- `{id}` — {name} in {city}, {currency} {price_per_night}/night")
+        stars = hotel.get("starRating") or hotel.get("stars")
+        star_str = f"{'⭐' * int(stars)} " if stars else ""
+
+        lines.append(
+            f"**{name}** — {city}  \n"
+            f"{star_str}💰 {currency} {price_per_night}/night  \n"
+            f"🆔 `{id}`\n\n---\n"
+        )
     return "\n".join(lines)
 
 
-def respond(message, history):
-    if history is None:
-        history = []
-    if not message or not message.strip():
-        yield history, history
-        return
-
+def _stream_response(message, history):
+    """Core streaming logic shared by both send and retry."""
     history = history + [
         {"role": "user", "content": message},
         {"role": "assistant", "content": "_Connecting..._"},
@@ -92,7 +98,10 @@ def respond(message, history):
                         flights_md = format_flights(event["flights"])
 
                 elif etype == "error":
-                    history[-1]["content"] = f"⚠️ {event.get('text', 'Something went wrong.')}"
+                    history[-1]["content"] = (
+                        f"⚠️ {event.get('text', 'Something went wrong.')}\n\n"
+                        "_You can try again using the 🔄 Retry button below._"
+                    )
                     yield history, history
                     return
 
@@ -102,7 +111,8 @@ def respond(message, history):
     except requests.exceptions.RequestException as exc:
         history[-1]["content"] = (
             f"⚠️ I couldn't reach the travel planner backend right now ({exc}). "
-            "If this is the first request in a while, the server may still be waking up — please try again shortly."
+            "If this is the first request in a while, the server may still be waking up — "
+            "please try again shortly using the 🔄 Retry button below."
         )
         yield history, history
         return
@@ -115,6 +125,37 @@ def respond(message, history):
 
     history[-1]["content"] = "\n\n".join(parts) if parts else "I couldn't find matching travel options."
     yield history, history
+
+
+def respond(message, history):
+    if history is None:
+        history = []
+    if not message or not message.strip():
+        yield history, history
+        return
+    yield from _stream_response(message, history)
+
+
+def retry_last(history):
+    if not history:
+        yield history, history
+        return
+
+    last_user_message = None
+    for msg in reversed(history):
+        if msg.get("role") == "user":
+            last_user_message = msg.get("content")
+            break
+
+    if not last_user_message:
+        yield history, history
+        return
+
+    trimmed_history = history[:-1] if history and history[-1].get("role") == "assistant" else history[:]
+    if trimmed_history and trimmed_history[-1].get("role") == "user":
+        trimmed_history = trimmed_history[:-1]
+
+    yield from _stream_response(last_user_message, trimmed_history)
 
 
 TRAVEL_THEME = gr.themes.Soft(
@@ -155,6 +196,8 @@ def main():
             )
             submit = gr.Button("Send ✈️", variant="primary", scale=1)
 
+        retry_btn = gr.Button("🔄 Retry last message", variant="secondary", size="sm")
+
         gr.Examples(
             examples=[
                 "Show me all hotels",
@@ -169,6 +212,8 @@ def main():
 
         message_event = message.submit(respond, inputs=[message, chatbot], outputs=[chatbot, chatbot])
         message_event.then(lambda: "", None, message)
+
+        retry_btn.click(retry_last, inputs=[chatbot], outputs=[chatbot, chatbot])
 
     demo.queue()
     demo.launch(

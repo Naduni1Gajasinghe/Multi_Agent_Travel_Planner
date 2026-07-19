@@ -45,7 +45,7 @@ def call_chat_api(message):
     request = Request(API_URL, data=payload, headers={"Content-Type": "application/json"})
 
     try:
-        response = urlopen(request, timeout=15)
+        response = urlopen(request, timeout=90)
         data = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
         return f"Unexpected error: {exc}"

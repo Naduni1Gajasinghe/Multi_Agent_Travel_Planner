@@ -1,10 +1,10 @@
 # TripWeaver — MCP-Based Multi-Agent Travel Planner
 
-TripWeaver is a conversational multi-agent travel planning assistant. A traveller describes what they need in natural language, and a graph of specialised agents — General QA, Hotel, and Flight — interprets the intent, reaches live external services through **MCP (Model Context Protocol)** servers, and returns a coherent, formatted response.
+TripWeaver is a conversational multi-agent travel planning assistant. A traveller describes what they need in natural language, and a graph of specialised agents — General QA, Hotel, and Flight — interprets the intent, reaches live external services through **MCP (Model Context Protocol)** servers, and streams back a coherent, formatted response.
 
 **Live demo:** https://tripweaver-frontend-w2hd.onrender.com
 
-**Cold start notice:** This app runs on Render's free tier. If services have been idle for 15+ minutes, the *first* message may take 30–90 seconds to respond while the backend and MCP servers wake up. Subsequent messages respond in a few seconds. This is expected behaviour, not a bug.
+>**Cold start notice:** This app runs on Render's free tier. If services have been idle for 15+ minutes, the *first* message may take 30–90 seconds to respond while the backend and MCP servers wake up. Subsequent messages respond in a few seconds. This is expected behaviour, not a bug.
 
 ---
 
@@ -14,7 +14,7 @@ TripWeaver is a conversational multi-agent travel planning assistant. A travelle
                      User (Gradio Chat UI)
                               │
                               ▼
-                     FastAPI Backend (main.py)
+              FastAPI Backend (main.py) — streams via SSE
                               │
                               ▼
               LangGraph Intent Router (agents/graph.py)
@@ -37,11 +37,11 @@ Agents never call external services directly — every hotel/flight fact comes f
 
 | Component | Technology |
 |---|---|
-| Backend / API | Python, FastAPI |
+| Backend / API | Python, FastAPI, Server-Sent Events (SSE) |
 | Agent orchestration | LangGraph (`StateGraph`) |
 | LLM / tool calling | LangChain, OpenAI (`gpt-4o-mini`) |
 | External service bridge | MCP (Model Context Protocol) via `langchain-mcp-adapters` |
-| Frontend | Gradio |
+| Frontend | Gradio, custom teal/orange theme |
 | Deployment | Render (4 independent web services) |
 
 ---
@@ -64,8 +64,8 @@ MultiAgent_travel_Planner/
 │   ├── client.py          # Standalone CLI MCP test client (dev use only)
 │   └── requirments.txt    # Dependencies for the MCP servers
 ├── entity.py              # FastAPI request/response models (ChatRequest, ChatResponse)
-├── main.py                # FastAPI app — /chat endpoint, invokes the LangGraph
-├── frontend.py             # Gradio chat interface
+├── main.py                # FastAPI app — /chat and /chat/stream endpoints
+├── frontend.py             # Gradio chat interface with live streaming and theming
 ├── requirments.txt         # Dependencies for backend + frontend
 └── .env                    # Local environment variables (never committed)
 ```
@@ -80,6 +80,7 @@ MultiAgent_travel_Planner/
 | `HOTEL_MCP_URL` | backend | Full URL to the deployed hotel MCP server, ending in `/mcp` |
 | `FLIGHT_MCP_URL` | backend | Full URL to the deployed flight MCP server, ending in `/mcp` |
 | `TRAVEL_PLANNER_API_URL` | frontend | Full URL to the deployed backend's `/chat` endpoint |
+| `TRAVEL_PLANNER_STREAM_URL` | frontend | *(optional)* full URL to `/chat/stream`; derived automatically from `TRAVEL_PLANNER_API_URL` if not set |
 | `PORT` | all services | Set automatically by Render; each service binds to it |
 
 None of these are hardcoded anywhere in the source — they are read via `os.environ` at runtime, with `localhost` fallbacks for local development.
@@ -88,7 +89,7 @@ None of these are hardcoded anywhere in the source — they are read via `os.env
 
 ## 4. Running locally
 
-We'll need **3 terminals**, each with the matching virtual environment activated.
+You'll need **4 terminals**, each with the matching virtual environment activated.
 
 ### 4.1 Set up environments
 
@@ -180,7 +181,27 @@ MCP_SERVERS = {
 
 ---
 
-## 6. Deployment (Render)
+## 6. Streaming architecture
+
+`main.py` exposes two endpoints:
+
+- **`POST /chat`** — the original request/response endpoint. Waits for the full LangGraph run to finish, returns one JSON payload. Kept as a stable fallback.
+- **`POST /chat/stream`** — a Server-Sent Events (SSE) endpoint that emits a sequence of typed events as the request is processed:
+  - `{"type": "activity", "text": "..."}` — a human-readable status update (e.g. *"Searching hotel suggestions..."*, *"Booking your flight..."*), sent as soon as the router determines intent
+  - `{"type": "token", "text": "..."}` — a piece of the response text
+  - `{"type": "data", "hotels": [...] }` / `{"type": "data", "flights": [...]}` — structured results, sent once available
+  - `{"type": "error", "text": "..."}` — a user-friendly error, if something failed
+  - `{"type": "done"}` — marks the end of the stream
+
+For **general Q&A** (the `unknown_node` path), token events carry *genuine* LLM output streamed live via `llm.astream(...)` — real, incremental generation, not a simulation.
+
+For **hotel/flight results**, the underlying data is already fully known once the MCP tool call returns (a list of hotels/flights is not something an LLM generates token-by-token). Rather than dumping the whole formatted answer at once, the backend reveals it in small word-groups with a short delay between each (`_chunk_text` in `main.py`). This is a deliberate design choice: it keeps the UI feel consistent with the general-QA path and gives the traveller visible progress, while being transparent that this portion is a progressive reveal of already-computed data rather than live token generation.
+
+`frontend.py` consumes this stream with `requests.post(..., stream=True)`, parsing each `data: {...}` line and updating the chat bubble incrementally via a Python generator wired into Gradio's `respond()` function.
+
+---
+
+## 7. Deployment (Render)
 
 The app is deployed as **4 independent Render web services**, all from the same GitHub repo.
 
@@ -202,13 +223,14 @@ The app is deployed as **4 independent Render web services**, all from the same 
 - **Wrong bind address:** `FastMCP` defaults to `127.0.0.1`, which Render cannot detect as an open port. Both MCP servers explicitly bind to `host="0.0.0.0"`.
 - **Missing dependency:** `langchain-mcp-adapters` must be listed in the root `requirments.txt` (used by the backend), not just the `MCP/requirments.txt`.
 - **Incomplete URLs:** environment variables must include the scheme (`https://`) and correct path (`/mcp`, `/chat`) — a bare domain will raise `ValueError: unknown url type`.
-- **Short timeouts:** the frontend's HTTP timeout was increased to 90 seconds to tolerate cold-start chains across multiple free-tier services.
+- **Short timeouts:** the frontend's HTTP timeout was increased to handle cold-start chains across multiple free-tier services.
+- **Gradio version drift:** newer Gradio releases moved `theme`/`css` from the `Blocks()` constructor to `launch()`, and removed some component kwargs (e.g. `Chatbot(show_copy_button=...)`). Deployed code was adjusted to match the installed Gradio version rather than pinning an older one.
 
 ---
 
-## 7. User guide
+## 8. User guide
 
-Open the live app and type a natural-language request. No need to specify which agent to use — the router figures out intent automatically.
+Open the live app and type a natural-language request. No need to specify which agent to use — the router figures out intent automatically. Watch the chat bubble for status updates (e.g. *"Searching hotel suggestions..."*) while the agent works, followed by the streamed answer.
 
 **Examples:**
 - `show me all hotels`
@@ -225,16 +247,15 @@ If a hotel or flight service is temporarily unavailable, the app returns a clear
 
 ---
 
-## 8. Known limitations / stretch goals not implemented
+## 9. Known limitations / stretch goals not implemented
 
-- No streaming token-by-token responses yet (frontend currently waits for the full reply)
-- No visible "Searching hotels…" / "Booking…" activity indicators in the UI
-- No conversation memory across turns beyond the last few exchanged messages
+- No persistent conversation memory beyond the last few exchanged messages (no "make it cheaper" style refinement across turns)
+- No result cards/structured layouts for hotel/flight options — results are shown as formatted text
 - No Docker/CI setup
-- Frontend styling is functional but not custom-themed
+- No additional MCP services beyond hotels and flights (e.g. activities, weather)
 
 ---
 
-## 9. Credits
+## 10. Credits
 
-Built as part of an AI Engineering program enhancement sprint, extending a baseline linear multi-agent workflow into an MCP-integrated, intent-routed, deployed application.
+Built as part of an AI Engineering program enhancement sprint, extending a baseline linear multi-agent workflow into an MCP-integrated, intent-routed, streaming, deployed application.

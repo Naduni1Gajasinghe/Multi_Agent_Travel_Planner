@@ -190,7 +190,7 @@ def main():
         with gr.Row():
             message = gr.Textbox(
                 label="Your message",
-                placeholder="e.g. Find me hotels in Bangkok, or flights from CMB to BKK on 2026-08-01",
+                placeholder="e.g. Find me hotels in Bangkok, or flights from HKT to PEN",
                 scale=5,
                 autofocus=True,
             )
@@ -201,7 +201,7 @@ def main():
         gr.Examples(
             examples=[
                 "Show me all hotels",
-                "Find flights from CMB to BKK",
+                "Find flights from HKT to PEN",
                 "What's the best time to visit Bangkok?",
             ],
             inputs=message,

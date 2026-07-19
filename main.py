@@ -5,7 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from entity import ChatRequest, ChatResponse
 from agents.graph import graph
-from agents.nodes import router, hotel_node, flight_node, generate_response
+from agents.nodes import (
+    router,
+    hotel_node,
+    flight_node,
+    generate_response,
+    _wants_coverage_list,
+    _get_real_coverage_context,
+)
 from agents.llm import llm
 from agents.prompts import get_system_prompt_for_unknown_node
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -145,10 +152,16 @@ async def chat_stream(request: ChatRequest):
                     await asyncio.sleep(0.02)
 
             else:
-                yield sse({"type": "activity", "text": "Thinking..."})
                 user_message = state["messages"][-1]
                 history_messages = state["messages"][:-1]
                 system_prompt = get_system_prompt_for_unknown_node("\n".join(history_messages))
+
+                if _wants_coverage_list(user_message):
+                    yield sse({"type": "activity", "text": "Checking what's available..."})
+                    coverage_context = await _get_real_coverage_context()
+                    system_prompt += coverage_context
+                else:
+                    yield sse({"type": "activity", "text": "Thinking..."})
 
                 invocation_messages = [SystemMessage(content=system_prompt)]
                 for i in range(0, len(history_messages), 2):

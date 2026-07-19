@@ -410,11 +410,82 @@ async def flight_node(state: GraphState) -> dict:
     return {"hotel_results": [], "flight_results": flight_results, "response_text": ""}
 
 
-def unknown_node(state: GraphState) -> dict:
+def _wants_coverage_list(message: str) -> bool:
+    """Detect questions asking what countries/cities are covered by the data."""
+    lowered = message.lower()
+    triggers = [
+        "what countries", "which countries", "countries do you have", "countries you have",
+        "what cities", "which cities", "cities do you have", "cities you have",
+        "list of countries", "list of cities", "list countries", "list cities",
+    ]
+    return any(t in lowered for t in triggers)
+
+
+async def _get_real_coverage_context() -> str:
+    """Fetch real hotel/flight data via MCP and extract the actual countries/cities
+    present, so the LLM answers from ground truth instead of guessing."""
+    try:
+        tools = await get_mcp_tools()
+    except Exception:
+        return ""
+
+    countries = set()
+    cities = set()
+
+    get_all_hotels = tools.get("get_all_hotels")
+    get_all_flights = tools.get("get_all_flights")
+
+    try:
+        if get_all_hotels:
+            hotel_result = await get_all_hotels.ainvoke({})
+            for hotel in _parse_mcp_result(hotel_result):
+                if not isinstance(hotel, dict):
+                    continue
+                if hotel.get("country"):
+                    countries.add(hotel["country"])
+                city_val = hotel.get("city")
+                if isinstance(city_val, str) and city_val:
+                    cities.add(city_val)
+                elif isinstance(city_val, dict) and city_val.get("name"):
+                    cities.add(city_val["name"])
+    except Exception:
+        pass
+
+    try:
+        if get_all_flights:
+            flight_result = await get_all_flights.ainvoke({})
+            for flight in _parse_mcp_result(flight_result):
+                if not isinstance(flight, dict):
+                    continue
+                for loc in (flight.get("origin"), flight.get("destination")):
+                    if isinstance(loc, dict):
+                        if loc.get("country"):
+                            countries.add(loc["country"])
+                        if loc.get("city"):
+                            cities.add(loc["city"])
+    except Exception:
+        pass
+
+    if not countries and not cities:
+        return ""
+
+    return (
+        "\n\nGROUNDING DATA — this is the real, complete list from the live database. "
+        "Answer using only this data; do not add or invent any entries beyond it:\n"
+        f"Countries covered: {', '.join(sorted(countries)) if countries else 'none found'}\n"
+        f"Cities covered: {', '.join(sorted(cities)) if cities else 'none found'}\n"
+    )
+
+
+async def unknown_node(state: GraphState) -> dict:
     user_message = state["messages"][-1]
     history_messages = state["messages"][:-1]
 
     system_prompt = get_system_prompt_for_unknown_node("\n".join(history_messages))
+
+    if _wants_coverage_list(user_message):
+        coverage_context = await _get_real_coverage_context()
+        system_prompt += coverage_context
 
     invocation_messages = [SystemMessage(content=system_prompt)]
     for i in range(0, len(history_messages), 2):

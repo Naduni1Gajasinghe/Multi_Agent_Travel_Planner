@@ -236,7 +236,7 @@ Open the live app and type a natural-language request. No need to specify which 
 - `show me all hotels`
 - `show me hotels in Bangkok`
 - `hotels in Mumbai from 2026-08-01 to 2026-08-05`
-- `find flights from CMB to BKK`
+- `find flights from HKT to PEN`
 - `show me all flights`
 - `book hotel <hotel_id> for John Doe, john@example.com, check in 2026-08-01, check out 2026-08-05, double room`
 - `book flight <flight_id> for Jane Smith, jane@example.com`
@@ -256,6 +256,3 @@ If a hotel or flight service is temporarily unavailable, the app returns a clear
 
 ---
 
-## 10. Credits
-
-Built as part of an AI Engineering program enhancement sprint, extending a baseline linear multi-agent workflow into an MCP-integrated, intent-routed, streaming, deployed application.
